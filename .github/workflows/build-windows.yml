@@ -1,0 +1,166 @@
+name: Build Windows installer
+
+# When it runs:
+#   - every push / pull request to main  -> test + build; installer attached to the run as an artifact
+#   - pushing a tag like v1.2.0          -> same, plus a GitHub Release with the installer attached
+#   - manually from the Actions tab      -> "Run workflow"
+#
+# Output files (in the run's Artifacts, and in the Release for tags):
+#   WarehouseManager-Setup-<version>.exe   normal Windows installer (recommended)
+#   WarehouseManager-<version>.exe         single file, runs without installing
+#   WarehouseManager-Portable-<version>.zip  folder version, unzip and run
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create releases
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  test:
+    name: Tests (Linux, virtual display)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+          pip install -r requirements.txt pytest
+      - name: Run tests (business rules + Tkinter UI)
+        run: xvfb-run -a pytest -q
+
+  build-windows:
+    name: Build .exe and installer
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Work out version number
+        id: version
+        shell: pwsh
+        run: |
+          $base = (Select-String -Path app/version.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $v = $env:GITHUB_REF_NAME.TrimStart('v')
+            if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "Tag must look like v1.2.3 (got $env:GITHUB_REF_NAME)" }
+          } else {
+            $v = "$base-dev.$env:GITHUB_RUN_NUMBER"
+          }
+          # Stamp the version into the app so the About window shows the real build number
+          (Get-Content app/version.py) -replace '__version__ = ".*"', "__version__ = `"$v`"" |
+            Set-Content app/version.py -Encoding utf8
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version $v"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Test runner.bat on real Windows (self-test and system check)
+        shell: cmd
+        run: |
+          call runner.bat selftest || exit /b 1
+          call runner.bat check < NUL || exit /b 1
+
+      - name: Run all tests (Windows)
+        run: pytest -q
+
+      - name: Build executable (PyInstaller)
+        run: |
+          python installer/make_version_info.py
+          pyinstaller --noconfirm --clean WarehouseManager.spec
+
+      - name: Check the executable
+        shell: pwsh
+        run: |
+          $exe = "dist\WarehouseManager\WarehouseManager.exe"
+          if (-not (Test-Path $exe)) { throw "exe was not produced" }
+          (Get-Item $exe).VersionInfo | Format-List ProductName, ProductVersion, CompanyName
+          # Start it and make sure it is still alive after a few seconds (i.e. did not crash)
+          $env:APPDATA = "$env:RUNNER_TEMP\wm-appdata"
+          $p = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 6
+          if ($p.HasExited) { throw "exe exited early with code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "exe started successfully"
+
+      # Optional: code signing removes the "Windows protected your PC" SmartScreen warning.
+      # Add CERT_PFX_BASE64 and CERT_PASSWORD as repository secrets, then uncomment.
+      # - name: Sign executable
+      #   shell: pwsh
+      #   run: |
+      #     [IO.File]::WriteAllBytes("cert.pfx", [Convert]::FromBase64String("${{ secrets.CERT_PFX_BASE64 }}"))
+      #     $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+      #     & $signtool sign /f cert.pfx /p "${{ secrets.CERT_PASSWORD }}" `
+      #       /tr http://timestamp.digicert.com /td sha256 /fd sha256 dist\WarehouseManager\WarehouseManager.exe
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = (Get-Command iscc.exe).Source }
+          & $iscc "/DMyAppVersion=${{ steps.version.outputs.version }}" installer\WarehouseManager.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Create portable zip (runs without installing)
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\WarehouseManager\* `
+            -DestinationPath "dist\installer\WarehouseManager-Portable-${{ steps.version.outputs.version }}.zip"
+
+      - name: Build single-file exe (one file, nothing to install)
+        run: pyinstaller --noconfirm --clean WarehouseManager-onefile.spec
+
+      - name: Check the single-file exe starts
+        shell: pwsh
+        run: |
+          $exe = "dist\WarehouseManager.exe"
+          if (-not (Test-Path $exe)) { throw "single-file exe was not produced" }
+          $env:APPDATA = "$env:RUNNER_TEMP\wm-appdata-onefile"
+          $p = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 12          # it unpacks itself first, so allow longer
+          if ($p.HasExited) { throw "single-file exe exited early with code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+          Copy-Item $exe "dist\installer\WarehouseManager-${{ steps.version.outputs.version }}.exe"
+          Write-Host "single-file exe OK"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WarehouseManager-${{ steps.version.outputs.version }}
+          path: dist/installer/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Warehouse Manager ${{ steps.version.outputs.version }}
+          files: dist/installer/*
+          generate_release_notes: true

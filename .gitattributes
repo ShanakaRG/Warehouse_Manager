@@ -1,0 +1,7 @@
+# Keep Windows batch files with Windows line endings (LF-only .bat files can break "goto")
+*.bat text eol=crlf
+*.iss text eol=crlf
+# Everything else: normalise line endings automatically
+*       text=auto
+*.ico   binary
+*.png   binary
