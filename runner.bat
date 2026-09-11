@@ -9,13 +9,19 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 title Warehouse Manager - Runner
 
-rem ---- Find a working Python: the "py" launcher first, then "python" on PATH ----
-rem      (the Microsoft Store "python" placeholder fails --version, so it is skipped)
+rem ---- Find a working Python ---------------------------------------------------
+rem  1. WM_PYTHON, if set (e.g.  set WM_PYTHON=C:\Python312\python.exe)
+rem  2. "python" on PATH  - the same Python that "pip install" uses
+rem  3. the "py" launcher - picks the NEWEST installed Python, which may be a
+rem     different one, so it is only the fallback
+rem  (the Microsoft Store "python" placeholder fails --version, so it is skipped)
 set "PY="
-py -3 --version >nul 2>&1 && set "PY=py -3"
+if defined WM_PYTHON "%WM_PYTHON%" --version >nul 2>&1 && set "PY="%WM_PYTHON%""
 if not defined PY python --version >nul 2>&1 && set "PY=python"
+if not defined PY py -3 --version >nul 2>&1 && set "PY=py -3"
 if not defined PY goto no_python
-for /f "delims=" %%v in ('%PY% --version 2^>^&1') do set "PYVER=%%v"
+rem "call" keeps a quoted WM_PYTHON path intact inside for /f
+for /f "delims=" %%v in ('call %PY% --version 2^>^&1') do set "PYVER=%%v"
 
 if not "%~1"=="" goto direct
 

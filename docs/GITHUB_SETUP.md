@@ -40,9 +40,10 @@ its own Windows computer. You never need to build the `.exe` yourself.
 ## Part 3: Watch the build
 
 8. On your repository page, open the **Actions** tab. A run called **Build Windows installer**
-   has started. It has two jobs:
-   - **Tests** (about 2 minutes)
-   - **Build .exe and installer** (about 8 to 12 minutes)
+   has started. It has these jobs:
+   - **Tests** on Linux (about 2 minutes)
+   - **Tests on Windows** with Python 3.12 and with the newest Python (about 3 minutes, side by side)
+   - **Build .exe and installer**, only after all tests pass (about 8 to 12 minutes)
 
    A green tick means success. A red cross means a step failed (see Troubleshooting).
 
@@ -95,6 +96,7 @@ git push origin v1.0.1
 | `git push` says *rejected ... fetch first* | The GitHub repository was not empty (a README was added). Run `git pull origin main --allow-unrelated-histories`, then `git push -u origin main`. |
 | Build stops with *Tag must look like v1.2.3* | The tag format was wrong. Delete it with `git tag -d v1.0` and `git push origin :refs/tags/v1.0`, then tag again as `v1.0.0`. |
 | Release step fails with *403* / *Resource not accessible* | Repository **Settings → Actions → General → Workflow permissions** → choose **Read and write permissions** → Save. Then re-run the job. |
+| Log shows *openpyxl is not installed* in the runner.bat step | `runner.bat` used a different Python from the one `pip` installed into. This is fixed in the current `runner.bat` and workflow (the workflow sets `WM_PYTHON`); make sure both files are the latest version. |
 | No runs appear in Actions | Check the `.github\workflows\build-windows.yml` file was uploaded (`git status` should not list it as untracked). |
 | Windows says *"Windows protected your PC"* on the client | Normal for unsigned programs: **More info → Run anyway**. A code-signing certificate removes it (see docs/DESIGN.md). |
 

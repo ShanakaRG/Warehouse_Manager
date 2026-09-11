@@ -48,6 +48,14 @@ python run.py --build      build the .exe
 **If Python is not found:** install Python 3.9 or newer from python.org and tick
 **"Add python.exe to PATH"**. Keep **"tcl/tk and IDLE"** ticked; that is Tkinter.
 
+**More than one Python installed?** `runner.bat` uses the `python` on PATH, and only falls
+back to the `py` launcher (which picks the newest version). Every mode prints which Python it
+is using. To force a specific one, run this once in the Command Prompt, then start
+`runner.bat` from that same window:
+```
+set WM_PYTHON=C:\Users\<you>\AppData\Local\Programs\Python\Python312\python.exe
+```
+
 ---
 
 ## Using the program
@@ -96,11 +104,12 @@ Each build produces three files. None of them need Python on the client's PC:
 `.github/workflows/build-windows.yml` runs on every push and pull request:
 
 1. Runs all tests on Linux under a virtual display.
-2. On a Windows runner: runs `runner.bat selftest` and `runner.bat check` (so the batch file
-   itself is tested on real Windows), runs all tests, builds the `.exe` with PyInstaller,
+2. On Windows, with Python 3.12 and with the newest Python: runs `runner.bat selftest`,
+   `runner.bat check` (so the batch file itself is tested on real Windows) and all tests.
+3. Only if every test passed: builds the `.exe` with PyInstaller,
    starts the `.exe` to confirm it doesn't crash, builds the installer with Inno Setup,
    makes a portable zip, and builds and start-tests the single-file `.exe`.
-3. Uploads the installer and zip as downloadable artifacts.
+4. Uploads the installer and zip as downloadable artifacts.
 
 **To publish a release**, push a version tag:
 ```

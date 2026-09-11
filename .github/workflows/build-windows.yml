@@ -43,9 +43,40 @@ jobs:
       - name: Run tests (business rules + Tkinter UI)
         run: xvfb-run -a pytest -q
 
+  test-windows:
+    name: Tests on Windows (Python ${{ matrix.python }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 builds the exe; "3.x" = newest Python (Tk 9), as on a freshly set-up PC
+        python: ["3.12", "3.x"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        id: setup-python
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pytest
+
+      - name: Test runner.bat (self-test and system check)
+        shell: cmd
+        env:
+          # make runner.bat use exactly this Python, not another one installed on the machine
+          WM_PYTHON: ${{ steps.setup-python.outputs.python-path }}
+        run: |
+          call runner.bat selftest || exit /b 1
+          call runner.bat check < NUL || exit /b 1
+
+      - name: Run all tests
+        run: python -m pytest -q
+
   build-windows:
     name: Build .exe and installer
-    needs: test
+    needs: [test, test-windows]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,16 +107,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-
-      - name: Test runner.bat on real Windows (self-test and system check)
-        shell: cmd
-        run: |
-          call runner.bat selftest || exit /b 1
-          call runner.bat check < NUL || exit /b 1
-
-      - name: Run all tests (Windows)
-        run: pytest -q
+          python -m pip install -r requirements-dev.txt
 
       - name: Build executable (PyInstaller)
         run: |

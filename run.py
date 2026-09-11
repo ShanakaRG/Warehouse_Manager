@@ -63,9 +63,16 @@ def title(text: str) -> None:
 
 
 def ask(question: str) -> bool:
-    if not sys.stdin.isatty():
+    """Yes/no question. Answers "no" automatically when nobody can type: on build servers
+    (CI), when input is redirected, or when input ends (Windows reports NUL as a console)."""
+    if os.environ.get("CI") or not sys.stdin or not sys.stdin.isatty():
+        print(f"  {question} -> no (not running interactively)")
         return False
-    return input(f"  {question} [y/N]: ").strip().lower() in ("y", "yes")
+    try:
+        return input(f"  {question} [y/N]: ").strip().lower() in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
 
 
 # ----------------------------------------------------------------- install ---
@@ -394,6 +401,7 @@ def main() -> int:
     args = parser.parse_args()
 
     print(f"{BOLD}Warehouse Manager - runner{RESET}  ({ROOT})")
+    print(f"  Python: {sys.executable} ({sys.version.split()[0]})")
     if args.check:
         return 0 if full_check() else 1
     if args.selftest:
